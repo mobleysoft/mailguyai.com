@@ -1,27 +1,42 @@
 /**
  * MailguyAI — Sovereign Edge Email Gateway
  *
- * Competes directly with Postmark/Resend. Zero external API key dependency.
- * Email is dispatched via the native Cloudflare `send_email` Worker binding,
- * which routes through Cloudflare's own SMTP infrastructure.
+ * Competes directly with Postmark/Resend, and long-term with Google
+ * Workspace's email layer. Zero external API key dependency for sending —
+ * mail is dispatched via the native Cloudflare `send_email` Worker binding.
+ *
+ * This file is a thin entry point: fetch() and email() route to modules,
+ * they don't contain business logic themselves. See modules/*.js.
  *
  * Bindings required:
- *   - SEND_EMAIL     : Cloudflare send_email binding (wrangler.toml [[send_email]])
- *   - MAILGUY_KV     : KV namespace for mail logs and static assets
- *   - MAILGUY_API_KEY: Secret — callers must Bearer-auth all /api/* requests
+ *   - SEND_EMAIL      : Cloudflare send_email binding (wrangler.toml [[send_email]])
+ *   - MAILGUY_KV       : KV namespace for mail logs and static assets
+ *   - MAILGUY_DB       : D1 database — mailboxes + messages metadata
+ *   - MAILGUY_R2       : R2 bucket — raw MIME bodies
+ *   - MAILGUY_API_KEY  : Secret — callers must Bearer-auth all /api/* requests
+ *   - CF_API_EMAIL/CF_API_KEY : Secrets — Cloudflare API auth, used by
+ *                               provisioning.js to verify Email Routing
  *
  * API:
- *   GET  /                       Landing page (from KV static:index or fallback)
- *   GET  /api/v1/health          Health probe
- *   POST /api/v1/send            Send an email (authenticated)
- *   GET  /api/v1/mail/:id        Retrieve delivery log for a sent mail
+ *   GET    /                                  Landing page
+ *   GET    /api/v1/health                     Health probe
+ *   POST   /api/v1/send                       Send an email (authenticated)
+ *   GET    /api/v1/mail/:id                   Legacy KV delivery log lookup
+ *   POST   /api/v1/mailboxes                  Provision a mailbox (authenticated)
+ *   DELETE /api/v1/mailboxes/:address         Deprovision a mailbox (authenticated)
+ *   GET    /api/v1/mailboxes/:address/messages  List stored messages (authenticated)
+ *   GET    /api/v1/messages/:id               Get one message incl. raw body (authenticated)
+ *   DELETE /api/v1/messages/:id               Delete a stored message (authenticated)
  */
 
-import { EmailMessage } from 'cloudflare:email';
+import { sendViaCloudflareSMTP } from './modules/outbound.js';
+import { handleInboundEmail } from './modules/inbound.js';
+import { getMailboxByAddress, listMessages, getMessage, deleteMessage } from './modules/mailbox-store.js';
+import { createMailbox, deleteMailbox } from './modules/provisioning.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
@@ -36,79 +51,14 @@ function err(message, code = 'ERROR', status = 400) {
   return json({ error: message, code }, status);
 }
 
-/**
- * Build a RFC 2822-compliant MIME message string using only Web APIs.
- * No npm dependency required — Cloudflare Workers support TextEncoder natively.
- */
-function buildMimeMessage({ from, fromName, to, subject, text, html }) {
-  const boundary = `mailguy_${crypto.randomUUID().replace(/-/g, '')}`;
-  const fromHeader = fromName ? `${fromName} <${from}>` : from;
-  const date = new Date().toUTCString();
-
-  let mime = [
-    `From: ${fromHeader}`,
-    `To: ${to}`,
-    `Subject: ${subject}`,
-    `Date: ${date}`,
-    `MIME-Version: 1.0`,
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-    ``,
-    `--${boundary}`,
-    `Content-Type: text/plain; charset="UTF-8"`,
-    `Content-Transfer-Encoding: 7bit`,
-    ``,
-    text || '',
-    ``,
-    `--${boundary}`,
-  ].join('\r\n');
-
-  if (html) {
-    mime += [
-      ``,
-      `Content-Type: text/html; charset="UTF-8"`,
-      `Content-Transfer-Encoding: 7bit`,
-      ``,
-      html,
-      ``,
-    ].join('\r\n');
-  }
-
-  mime += `\r\n--${boundary}--\r\n`;
-  return mime;
+function isAuthorized(request, env) {
+  const authHeader = request.headers.get('Authorization') || '';
+  return authHeader.startsWith('Bearer ') && authHeader.slice(7) === env.MAILGUY_API_KEY;
 }
 
-/**
- * Dispatch email via Cloudflare's native send_email binding.
- * This is the sovereign path — no Resend, no Postmark, no API keys.
- */
-async function sendViaCloudflareSMTP(env, { from, fromName, to, subject, text, html }) {
-  const mimeRaw = buildMimeMessage({ from, fromName, to, subject, text, html });
-  const encoder = new TextEncoder();
-  const encoded = encoder.encode(mimeRaw);
-  // CF EmailMessage requires a ReadableStream for the body
-  const stream = new ReadableStream({
-    start(controller) {
-      controller.enqueue(encoded);
-      controller.close();
-    }
-  });
-  const message = new EmailMessage(from, to, stream);
-  await env.SEND_EMAIL.send(message);
-}
-
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const method = request.method;
-
-    if (method === 'OPTIONS') {
-      return new Response(null, { headers: CORS });
-    }
-
-    // --- Landing page ---
-    if (method === 'GET' && url.pathname === '/') {
-      const html = await env.MAILGUY_KV.get('static:index') ||
-        `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+async function landingPage(env) {
+  return await env.MAILGUY_KV.get('static:index') ||
+    `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>MailguyAI — Sovereign Edge Email</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -123,22 +73,41 @@ export default {
   <p>Sovereign edge email infrastructure. Zero third-party API dependency.<br>Built on Cloudflare's global SMTP backbone.</p>
   <span class="badge">Production · Edge-Native</span>
 </div></body></html>`;
+}
+
+export default {
+  // Real inbound handler — delegates entirely to modules/inbound.js.
+  async email(message, env, ctx) {
+    await handleInboundEmail(message, env, ctx);
+  },
+
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    const method = request.method;
+    const path = url.pathname;
+
+    if (method === 'OPTIONS') {
+      return new Response(null, { headers: CORS });
+    }
+
+    // --- Landing page ---
+    if (method === 'GET' && path === '/') {
+      const html = await landingPage(env);
       return new Response(html, { headers: { ...CORS, 'Content-Type': 'text/html;charset=utf-8' } });
     }
 
     // --- Health probe ---
-    if (method === 'GET' && url.pathname === '/api/v1/health') {
-      return json({ status: 'ok', version: '2.0.0', engine: 'cloudflare-native', timestamp: Date.now() });
+    if (method === 'GET' && path === '/api/v1/health') {
+      return json({ status: 'ok', version: '2.1.0', engine: 'cloudflare-native', timestamp: Date.now() });
     }
 
-    // --- Auth gate for all /api/* routes ---
-    const authHeader = request.headers.get('Authorization') || '';
-    if (!authHeader.startsWith('Bearer ') || authHeader.slice(7) !== env.MAILGUY_API_KEY) {
+    // --- Auth gate for all other /api/* routes ---
+    if (!isAuthorized(request, env)) {
       return err('Unauthorized', 'UNAUTHORIZED', 401);
     }
 
     // --- Send email ---
-    if (method === 'POST' && url.pathname === '/api/v1/send') {
+    if (method === 'POST' && path === '/api/v1/send') {
       let body;
       try { body = await request.json(); } catch { return err('Invalid JSON', 'INVALID_INPUT'); }
 
@@ -181,13 +150,56 @@ export default {
       return json({ success: true, id: mailId, engine: 'cloudflare-native' });
     }
 
-    // --- Delivery log lookup ---
-    if (method === 'GET' && url.pathname.startsWith('/api/v1/mail/')) {
-      const mailId = url.pathname.split('/api/v1/mail/')[1];
+    // --- Legacy KV delivery log lookup ---
+    if (method === 'GET' && path.startsWith('/api/v1/mail/')) {
+      const mailId = path.split('/api/v1/mail/')[1];
       if (!mailId) return err('Mail ID required', 'INVALID_INPUT');
       const logStr = await env.MAILGUY_KV.get(`mail:${mailId}`);
       if (!logStr) return err('Not found', 'NOT_FOUND', 404);
       return json(JSON.parse(logStr));
+    }
+
+    // --- Provision a mailbox ---
+    if (method === 'POST' && path === '/api/v1/mailboxes') {
+      let body;
+      try { body = await request.json(); } catch { return err('Invalid JSON', 'INVALID_INPUT'); }
+      const result = await createMailbox(env, body);
+      return result.ok ? json(result, 201) : err(result.error, 'PROVISION_FAILED', 400);
+    }
+
+    // --- Deprovision a mailbox ---
+    if (method === 'DELETE' && path.startsWith('/api/v1/mailboxes/') && !path.endsWith('/messages')) {
+      const address = decodeURIComponent(path.split('/api/v1/mailboxes/')[1] || '');
+      if (!address) return err('Address required', 'INVALID_INPUT');
+      const result = await deleteMailbox(env, address);
+      return result.ok ? json(result) : err(result.error, 'NOT_FOUND', 404);
+    }
+
+    // --- List messages for a mailbox ---
+    const messagesMatch = path.match(/^\/api\/v1\/mailboxes\/([^/]+)\/messages$/);
+    if (method === 'GET' && messagesMatch) {
+      const address = decodeURIComponent(messagesMatch[1]);
+      const mailbox = await getMailboxByAddress(env, address);
+      if (!mailbox) return err('Mailbox not found', 'NOT_FOUND', 404);
+      const limit = Number(url.searchParams.get('limit')) || 50;
+      const offset = Number(url.searchParams.get('offset')) || 0;
+      const messages = await listMessages(env, mailbox.id, { limit, offset });
+      return json({ mailbox: mailbox.address, count: messages.length, messages });
+    }
+
+    // --- Get / delete a single message ---
+    if (path.startsWith('/api/v1/messages/')) {
+      const messageId = path.split('/api/v1/messages/')[1];
+      if (!messageId) return err('Message ID required', 'INVALID_INPUT');
+
+      if (method === 'GET') {
+        const msg = await getMessage(env, messageId);
+        return msg ? json(msg) : err('Not found', 'NOT_FOUND', 404);
+      }
+      if (method === 'DELETE') {
+        const deleted = await deleteMessage(env, messageId);
+        return deleted ? json({ success: true, id: messageId }) : err('Not found', 'NOT_FOUND', 404);
+      }
     }
 
     return err('Not found', 'NOT_FOUND', 404);

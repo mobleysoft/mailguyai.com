@@ -6,6 +6,17 @@ compatibility_date = "2024-05-12"
 binding = "MAILGUY_KV"
 id = "ccc7ada3f8bf4976b6b1cbe9f7b03747"
 
+# D1 — mailbox + message metadata (Phase 1 storage, added 2026-09-08)
+[[d1_databases]]
+binding = "MAILGUY_DB"
+database_name = "mailguyai-com-db"
+database_id = "754b5bfd-ee38-4b45-a7de-8de4c7847e58"
+
+# R2 — raw MIME bodies for received mail (Phase 1 storage, added 2026-09-08)
+[[r2_buckets]]
+binding = "MAILGUY_R2"
+bucket_name = "mailguyai-com-mail"
+
 # Sovereign SMTP — Cloudflare native email binding. Zero external API dependency.
 # Requires "Email Routing" to be enabled on the weylandai.com / mailguyai.com zone.
 # Sending domain must be verified in Cloudflare Email Routing settings.
