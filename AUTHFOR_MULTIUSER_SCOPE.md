@@ -194,6 +194,16 @@ account is live.
 8. Grant John and Ron `send` access on that mailbox via step 5's route,
    once Mobley's registration call (above) has run for real.
 
+**Status (2026-09-10): steps 1-5 are done** - migration 0002 applied
+to the live D1 database, `modules/authfor.js` + `modules/me-routes.js`
+built and wired into `worker.js`, 26/26 tests passing, deployed via
+`wrangler deploy`, and live-verified (`/api/v1/me` and
+`/api/v1/mailboxes/:address/access` both 401 without a real identity;
+existing routes unaffected). Steps 6-8 remain: `inbox.html` UI is not
+started; provisioning `outreach@weylandai.com` and granting real
+access are gated on Email Routing verification and Mobley's
+registration call for Ron, per below.
+
 Steps 1-4 and 6 have no dependency on Ron's account existing and can
 be built, tested, and deployed now. Steps 7-8 are the real-world
 activation steps, gated on Email Routing verification and Mobley's
