@@ -1,0 +1,8 @@
+{
+  "name": "mailguyai-com-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --import ./test/register-loader.mjs --test modules/*.test.mjs"
+  }
+}

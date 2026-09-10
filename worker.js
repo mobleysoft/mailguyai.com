@@ -27,12 +27,22 @@
  *   GET    /api/v1/mailboxes/:address/messages  List stored messages (authenticated)
  *   GET    /api/v1/messages/:id               Get one message incl. raw body (authenticated)
  *   DELETE /api/v1/messages/:id               Delete a stored message (authenticated)
+ *
+ *   Per-user (AuthFor-authenticated) routes — see modules/me-routes.js and
+ *   AUTHFOR_MULTIUSER_SCOPE.md:
+ *   GET    /api/v1/me
+ *   GET    /api/v1/me/mailboxes/:address/messages
+ *   GET    /api/v1/me/mailboxes/:address/outreach-log
+ *   GET    /api/v1/me/messages/:id
+ *   POST   /api/v1/me/mailboxes/:address/send
+ *   POST   /api/v1/mailboxes/:address/access  Grant a user access (admin-key gated)
  */
 
 import { sendViaCloudflareSMTP } from './modules/outbound.js';
 import { handleInboundEmail } from './modules/inbound.js';
 import { getMailboxByAddress, listMessages, getMessage, deleteMessage } from './modules/mailbox-store.js';
 import { createMailbox, deleteMailbox } from './modules/provisioning.js';
+import { handleMeRoutes } from './modules/me-routes.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -100,6 +110,12 @@ export default {
     if (method === 'GET' && path === '/api/v1/health') {
       return json({ status: 'ok', version: '2.1.0', engine: 'cloudflare-native', timestamp: Date.now() });
     }
+
+    // --- Per-user (AuthFor-authenticated) routes: own auth, dispatched
+    // before the admin-key gate below. Returns null for anything it
+    // doesn't recognize, so unmatched paths fall through unchanged. ---
+    const meResponse = await handleMeRoutes(request, env, ctx);
+    if (meResponse) return meResponse;
 
     // --- Auth gate for all other /api/* routes ---
     if (!isAuthorized(request, env)) {
