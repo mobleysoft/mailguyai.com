@@ -101,47 +101,100 @@ use keeps its own key, human end-users get their own identity. Two
 separate, real auth paths for two separate real use cases, not a
 replacement of one by the other.
 
-### Minimal UI (open question - see below)
+### Decided: browsable UI, both John and Ron get `send`
+
+Both need a real UI (not API-only), and both actively send from
+outreach@ - that's *why* the outreach tracker matters (see below): two
+people sending from the same address need visibility into what the
+other already sent, not a read/write split between them.
 
 A single static page (`inbox.html`), reusing the real
 `AuthForStandard` client widget already built and working at
 `weylandai.com/assets/authfor-integration-standard.js` (same
 `clientId`/`ventureName` constructor pattern, new `clientId` value like
-`af_mailguy_login`) for the login flow, then a plain fetch loop against
-the new `/api/v1/me/*` routes to list and render messages. Genuinely
-small - the widget and the API are both already real - but real scope,
-not zero.
+`af_mailguy_login`) for the login flow, then plain fetches against the
+`/api/v1/me/*` routes to list/read/send messages and to check the
+outreach log before sending. Three views: Inbox, Compose (with a live
+"already contacted?" check), Outreach Log.
+
+### Outreach tracker (new - not in the original scope)
+
+The actual goal: before either of you emails a new prospect via
+outreach@weylandai.com, you can see whether the other already has -
+so you don't both cold-email the same person.
+
+**Real gap found while designing this**: the *existing* `POST
+/api/v1/send` path never writes to `MAILGUY_DB.messages` at all today -
+only a 30-day KV log entry and a billing event (worker.js:137-148).
+Only *inbound* mail is persisted (`modules/inbound.js` →
+`storeMessage`). So the tracker isn't just a new read view over
+existing data - outbound sends need to start being persisted to D1
+for the first time, with who-sent-it recorded.
+
+- Add `sent_by_user_id TEXT REFERENCES users(id)` (nullable - the
+  existing admin-key `/api/v1/send` path has no user identity to put
+  there) to the `messages` table, in the same migration 0002.
+- The new `POST /api/v1/me/mailboxes/:address/send` route (unlike the
+  existing admin one) calls `storeMessage(..., direction: 'outbound',
+  sent_by_user_id: user.id)` after a successful send - real
+  persistence, not just a KV log.
+- New route: `GET /api/v1/me/mailboxes/:address/outreach-log?to=<email>`
+  - checks one address ("has anyone contacted this person before?",
+  for the compose-screen live check) - and the bare `GET
+  .../outreach-log` for the full sortable history (who, when, subject,
+  to whom).
+
+### Mobley-triggered step: Ron's real AuthFor account
+
+Per direction: this app (and I, in this session) never handle Ron's
+actual password. **Mobley** is what calls AuthFor's real registration
+endpoint - confirmed via the same research pass that grounded the
+rest of this doc (`weylandai.com`'s only real AuthFor integration):
+
+```
+POST https://authfor.com/api/v1/register
+Content-Type: application/json
+
+{
+  "email": "<ron's real email>",
+  "password": "<set by Ron or provisioned by Mobley - not this app>",
+  "name": "Ron",
+  "client_id": "af_mailguy_login",
+  "venture_id": "mailguyai.com"
+}
+```
+
+Once that real account exists, the only thing *this app* needs is
+Ron's email - to insert his `users` row and grant `mailbox_access` via
+step 4 below. This app's build (steps 1-3, 5-8) doesn't block on that
+account existing yet - it can be built and tested with a fake email
+today, and step 4 just runs once for real once Mobley confirms the
+account is live.
 
 ## Ordered implementation steps
 
-1. Migration 0002 (`users`, `mailbox_access`) - no behavior change yet,
-   safe to ship alone.
+1. Migration 0002: `users`, `mailbox_access`, plus `sent_by_user_id` on
+   `messages` - no behavior change yet, safe to ship alone.
 2. `modules/authfor.js` - port the verify+bridge logic, unit-testable
-   against a fake `fetch` the same way this session's other AuthFor-
-   adjacent tests have been written, no live AuthFor calls in tests.
-3. The 4 new `/api/v1/me/*` routes wired into `worker.js`, gated by
-   step 2's module instead of `isAuthorized()`.
-4. The admin grant route (`POST /api/v1/mailboxes/:address/access`) -
-   the actual mechanism for adding Ron, keyed by his email once he has
-   a real AuthFor account, no password ever touches this app or this
-   chat.
-5. Provision `outreach@weylandai.com` for real via the *existing*
+   against a fake `fetch`, no live AuthFor calls in tests.
+3. The 4 new `/api/v1/me/*` routes (`GET /me`, `GET
+   /me/mailboxes/:address/messages`, `GET /me/messages/:id`, `POST
+   /me/mailboxes/:address/send` - the last one now also persisting to
+   `messages` with `sent_by_user_id`) wired into `worker.js`.
+4. The 2 outreach-log routes
+   (`GET /me/mailboxes/:address/outreach-log[?to=]`).
+5. The admin grant route (`POST /api/v1/mailboxes/:address/access`) -
+   how John grants Ron access once Mobley confirms Ron's real AuthFor
+   account exists (email only, no password touches this app).
+6. `inbox.html` - Inbox / Compose (with the live outreach-log check) /
+   Outreach Log views, using the real `AuthForStandard` widget.
+7. Provision `outreach@weylandai.com` for real via the *existing*
    `POST /api/v1/mailboxes` (needs Email Routing verified/enabled on
    weylandai.com's zone first - real prerequisite, not assumed).
-6. Grant John `owner` and Ron `read` (or `send`, per whatever's
-   decided) on that mailbox via step 4's route.
-7. (Open question below) the minimal `inbox.html` UI, if wanted.
+8. Grant John and Ron `send` access on that mailbox via step 5's route,
+   once Mobley's registration call (above) has run for real.
 
-## Open questions - need a real decision before starting
-
-- **Does Ron need a browsable UI, or is API access enough for now?**
-  Changes whether step 7 is in scope for this pass.
-- **What role does Ron actually need** - read-only visibility into
-  outreach@, or does he also need to send from it? Changes whether the
-  `send` route ships in the first pass.
-- **Does Ron already have a real AuthFor account?** If not, that's the
-  one remaining human step (he signs up himself, at whatever AuthFor's
-  real signup surface is) - not something this app or I can do for
-  him, and not blocking on the backend work above, which can be built
-  and tested independently of any specific real person's account
-  existing yet.
+Steps 1-4 and 6 have no dependency on Ron's account existing and can
+be built, tested, and deployed now. Steps 7-8 are the real-world
+activation steps, gated on Email Routing verification and Mobley's
+registration call respectively.
