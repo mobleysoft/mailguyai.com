@@ -197,11 +197,19 @@ account is live.
 **Status (2026-09-10): steps 1-5 are done** - migration 0002 applied
 to the live D1 database, `modules/authfor.js` + `modules/me-routes.js`
 built and wired into `worker.js`, 26/26 tests passing, deployed via
-`wrangler deploy`, and live-verified (`/api/v1/me` and
-`/api/v1/mailboxes/:address/access` both 401 without a real identity;
-existing routes unaffected). Steps 6-8 remain: `inbox.html` UI is not
-started; provisioning `outreach@weylandai.com` and granting real
-access are gated on Email Routing verification and Mobley's
+`wrangler deploy`. **Correction, same day**: the original "live-verified"
+claim above only ever checked `mailguyai-com-worker.johnmobley99.workers.dev`
+directly - the real `mailguyai.com` domain's Cloudflare route pointed at
+`mascom-edge` (a static GitHub-Pages landing page), which was silently
+serving that same static page for `/api/*` too via its own 404-fallback
+logic, not this worker at all. Nobody could actually reach any of this
+at the real domain. Fixed by adding a narrow `mailguyai.com/api/*` route
+to `mailguyai-com-worker` (the landing page keeps serving `/` via
+mascom-edge, untouched) - now genuinely live-verified at the real domain
+(`/api/v1/health` returns real JSON, `/api/v1/me` returns a real 401).
+Steps 6-8 remain: `inbox.html` UI is not started; provisioning
+`outreach@weylandai.com` and granting real access are gated on Email
+Routing verification and Mobley's
 registration call for Ron, per below.
 
 Steps 1-4 and 6 have no dependency on Ron's account existing and can
