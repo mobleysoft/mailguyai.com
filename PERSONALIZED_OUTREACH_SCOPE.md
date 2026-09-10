@@ -80,49 +80,62 @@ auto-generate from nothing.
   spec ("review-and-send rather than full autopilot... full autopilot
   response-sending carries real liability").
 
-## Phase 3: the personalized landing page (large - genuinely new infrastructure)
+## Phase 3: the personalized before/after landing page (large - genuinely new infrastructure)
 
-The most novel and highest-effort piece. Real sub-steps:
+Revised design (2026-09-10): instead of morphing abstract colors
+between a generic template and their site, this is an honest **"here's
+your site, here's our redesign, here's specifically what we'd
+improve"** comparison - a real, well-established agency-pitch pattern,
+not a cosmetic reskin. This also directly resolves the open question
+the first draft of this doc raised: a labeled before/after critique is
+categorically different from silently reproducing someone's design -
+there's nothing to confirm a line on here, the honesty *is* the pitch.
 
-1. **Scrape the prospect's site** - fetch their homepage HTML, extract:
-   dominant color palette (from CSS/inline styles on header/nav/CTA
-   elements - a real, boundable computer-vision-adjacent problem, not
-   full page cloning), logo (favicon / `og:image` / header `<img>`
-   heuristics), and site title/tagline text. **Not** a pixel-perfect
-   layout clone - that's a much harder problem than color/logo
-   extraction and isn't what "their own shape and color" requires to
-   be convincing.
-2. **A real WeylandAI "proposed build" template** - this needs to
-   exist as an actual design (colors, layout, copy) before anything
-   can morph *into* it. Real design work, not something inferred from
-   the prospect's site.
-3. **The morph itself**: a single static page per prospect, built at
-   generation time (not rendered live per-visitor) from the scraped
-   palette/logo + the template, using CSS custom properties
-   interpolated via `scroll-timeline`/`animation-timeline: scroll()`
-   (or a scroll-percentage JS fallback for browsers without native
-   support yet - real browser support is still partial) to shift
-   `--brand-color`, `--bg-color`, etc. from the prospect's extracted
-   values to WeylandAI's as the visitor scrolls.
-4. **Hosting**: one static page per prospect at a real, sharable URL.
-   Cloudflare Pages or R2+Workers (same pattern as `serveR2` elsewhere
-   in this estate) - generated once when the outreach draft is created
-   (Phase 2), not on-demand per email open.
-5. **The email-embedded preview**: a static screenshot or short GIF of
-   the effect, generated once (e.g. via Cloudflare's Browser Rendering
-   binding taking a scroll-sequence of screenshots - the same real
-   capability already used elsewhere in this estate, not a new
-   dependency), embedded as an inline image with the live page linked
-   underneath.
+Real sub-steps:
 
-**Real open question, not a detail to skip**: scraping a prospect's
-site without their knowledge, to build a page that visually references
-their own branding, sits in a gray area worth a real decision before
-building - not a legal read from me, but worth John explicitly deciding
-the line (e.g. "generic color/logo extraction from a public homepage"
-reads very differently from "we copied your layout" - the phase 3
-scope above is deliberately the former, not the latter, but confirm
-that's the intended line before this ships).
+1. **Capture the prospect's real homepage as a screenshot** - via
+   Cloudflare's Browser Rendering binding (`env.BROWSER`), the exact
+   same real capability `mailguyai.com`'s own sibling venture
+   `cutsheetx`/discovery-engine work already uses elsewhere in this
+   estate, not a new dependency. Full-page screenshot at a fixed
+   viewport. This is the real "before" - a faithful capture, not a
+   reconstruction, so nothing about it can misrepresent their actual
+   site.
+2. **A real WeylandAI "after" redesign template** - one real, well-
+   designed template (or a small set of variants per sub-industry) in
+   WeylandAI's actual house style, with slots for the prospect's real
+   logo, company name, and tagline (scraped via favicon/`og:image`/
+   header-`<img>` heuristics - lightweight, not full-page parsing).
+   This is real design work that has to exist before anything can
+   compare against it - not inferred from the prospect's page, and not
+   a redraw of their actual layout.
+3. **The specific improvement callouts** - generated per-prospect by
+   giving the real before-screenshot to Claude's vision capability
+   (already used extensively elsewhere in this estate for real
+   document/image analysis - e.g. the hardware-extraction pipeline)
+   and asking for 3-5 concrete, defensible, checkable critique points
+   grounded in what's actually visible (e.g. "no clear call-to-action
+   above the fold", "dense text-only hero", "nav buried in a hamburger
+   menu on desktop") - not generic marketing copy, not fabricated
+   stats. Each callout should be something the prospect could look at
+   their own real site and verify is true.
+4. **The comparison mechanic**: a scroll-pinned section that
+   crossfades/wipes between the two real images (their real screenshot
+   → the real redesign) via `clip-path` or opacity, driven by
+   `scroll-timeline`/`animation-timeline: scroll()` (JS scrollY
+   fallback for browsers without native support yet), with each
+   improvement callout fading in as a labeled annotation at its own
+   scroll checkpoint, pointing at the specific redesigned region it
+   describes. A real, standard scroll-reveal technique - just applied
+   to two real screenshots instead of a live-rendered page.
+5. **Hosting**: one static page per prospect at a real, sharable URL
+   (Cloudflare Pages or R2+Workers, same `serveR2` pattern used
+   elsewhere in this estate) - generated once when the outreach draft
+   is created (Phase 2), not on-demand per email open.
+6. **The email-embedded preview**: a static image or short GIF of the
+   effect (Browser Rendering can capture a scroll-sequence the same
+   way it captures the initial screenshot), embedded inline with the
+   live page linked underneath.
 
 ## Ordered plan across all three phases
 
@@ -134,14 +147,15 @@ that's the intended line before this ships).
 3. Phase 2's capability-sheet content (real work, not code) - needed
    before `modules/outreach-gen.js` can produce anything honest.
 4. Phase 2's generation module + draft route + review UI.
-5. Phase 3's WeylandAI "proposed build" template (real design work).
-6. Phase 3's scraper + morph-page generator + hosting + email-preview
-   pipeline - the largest remaining piece, worth its own follow-up
-   scope doc once 1-5 are real and the open question above is
-   answered, rather than fully detailing implementation now.
+5. Phase 3's WeylandAI "after" redesign template(s) (real design work -
+   this has to exist before step 6 can compare against it).
+6. Phase 3's screenshot capture + callout generation + comparison-page
+   builder + hosting + email-preview pipeline - the largest remaining
+   piece, worth its own follow-up scope doc with real implementation
+   detail once 1-5 are real, rather than fully detailing now.
 
 Phases 1-2 don't depend on Phase 3 at all and can ship independently.
 Phase 3 is the piece that turns this into something qualitatively
-different from a normal outreach tool - real, but the highest-effort
-and highest-judgment part, and the one with an open question that
-needs your answer before implementation starts.
+different from a normal outreach tool - real, still the highest-effort
+part, but no longer blocked on an open question - the before/after
+framing is honest by construction.
