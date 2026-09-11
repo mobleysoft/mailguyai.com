@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MailguyAI — Inbox</title>
+<style>
+  :root { color-scheme: dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0e14; color: #f5f1e8; margin: 0; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 16px 24px; border-bottom: 1px solid rgba(255,176,32,0.2); }
+  header h1 { font-size: 18px; margin: 0; }
+  header .who { font-size: 13px; color: #9aa4b8; }
+  header button { background: transparent; border: 1px solid #333; color: #aaa; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px; display: none; grid-template-columns: 220px 1fr; gap: 24px; }
+  main.ready { display: grid; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: #9aa4b8; margin: 0 0 10px; }
+  #mailbox-list { list-style: none; padding: 0; margin: 0; }
+  #mailbox-list li { padding: 8px 10px; border-radius: 6px; cursor: pointer; font-size: 13px; color: #ccc; margin-bottom: 4px; }
+  #mailbox-list li.active { background: rgba(255,176,32,0.12); color: #ffb020; }
+  #mailbox-list .role { color: #666; font-size: 11px; }
+  section { margin-bottom: 28px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  th { color: #9aa4b8; font-weight: 500; font-size: 11px; text-transform: uppercase; }
+  form.compose input, form.compose textarea { width: 100%; background: #121826; border: 1px solid rgba(255,176,32,0.2); color: #f5f1e8; border-radius: 6px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; box-sizing: border-box; font-family: inherit; }
+  form.compose textarea { min-height: 100px; resize: vertical; }
+  form.compose button { background: #ffb020; color: #20150a; border: none; border-radius: 6px; padding: 9px 16px; font-weight: 600; cursor: pointer; font-size: 13px; }
+  form.compose button:disabled { opacity: 0.5; cursor: default; }
+  #compose-warning { font-size: 12px; margin: 6px 0; padding: 8px 10px; border-radius: 6px; display: none; }
+  #compose-warning.contacted { display: block; background: rgba(255,176,32,0.1); color: #ffb020; border: 1px solid rgba(255,176,32,0.25); }
+  #compose-warning.clear { display: block; background: rgba(76,175,80,0.1); color: #4caf50; border: 1px solid rgba(76,175,80,0.25); }
+  .empty { color: #666; font-size: 13px; padding: 8px 0; }
+  .send-role-only { display: none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>MailguyAI — Inbox</h1>
+  <div>
+    <span class="who" id="who"></span>
+    <button id="logout-btn" style="display:none">Sign out</button>
+  </div>
+</header>
+
+<div id="login-ui"></div>
+
+<main id="main">
+  <div>
+    <h2>Mailboxes</h2>
+    <ul id="mailbox-list"></ul>
+  </div>
+
+  <div>
+    <section class="send-role-only" id="compose-section">
+      <h2>Compose</h2>
+      <form class="compose" id="compose-form">
+        <input type="email" id="c-to" placeholder="to@company.com" required>
+        <input type="text" id="c-subject" placeholder="Subject" required>
+        <textarea id="c-body" placeholder="Message"></textarea>
+        <div id="compose-warning"></div>
+        <button type="submit" id="send-btn">Send</button>
+      </form>
+    </section>
+
+    <section>
+      <h2>Outreach log</h2>
+      <table id="outreach-table">
+        <thead><tr><th>To</th><th>Subject</th><th>Sent</th><th>By</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="outreach-empty" style="display:none">No outbound mail logged yet for this mailbox.</div>
+    </section>
+
+    <section>
+      <h2>Messages</h2>
+      <table id="messages-table">
+        <thead><tr><th>Direction</th><th>From/To</th><th>Subject</th><th>Received</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="messages-empty" style="display:none">No messages stored for this mailbox yet.</div>
+    </section>
+  </div>
+</main>
+
+<script src="/assets/authfor-integration-standard.js"></script>
+<script>
+const API_BASE = window.location.origin;
+
+const auth = new AuthForStandard({
+  ventureName: 'mailguyai.com',
+  loginUISelector: '#login-ui',
+});
+
+let currentMailbox = null;
+let currentRole = null;
+
+async function api(path, opts = {}) {
+  const res = await fetch(API_BASE + path, {
+    ...opts,
+    headers: { ...(opts.headers || {}), Authorization: 'Bearer ' + auth.getToken() },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || `Request failed (${res.status})`);
+  }
+  return res.json();
+}
+
+function esc(s) { return (s ?? '').toString().replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleString() : '—'; }
+
+async function loadMailboxes() {
+  const { mailboxes } = await api('/api/v1/me');
+  const list = document.getElementById('mailbox-list');
+  list.innerHTML = '';
+  for (const mb of mailboxes) {
+    const li = document.createElement('li');
+    li.textContent = mb.address;
+    li.innerHTML = `${esc(mb.address)}<br><span class="role">${esc(mb.role)}</span>`;
+    li.addEventListener('click', () => selectMailbox(mb.address, mb.role));
+    list.appendChild(li);
+  }
+  if (mailboxes.length) selectMailbox(mailboxes[0].address, mailboxes[0].role);
+}
+
+async function selectMailbox(address, role) {
+  currentMailbox = address;
+  currentRole = role;
+  document.querySelectorAll('#mailbox-list li').forEach((li) => {
+    li.classList.toggle('active', li.textContent.startsWith(address));
+  });
+  document.getElementById('compose-section').style.display = ['owner', 'send'].includes(role) ? 'block' : 'none';
+  await Promise.all([loadMessages(), loadOutreachLog()]);
+}
+
+async function loadMessages() {
+  const { messages } = await api(`/api/v1/me/mailboxes/${encodeURIComponent(currentMailbox)}/messages`);
+  const tbody = document.querySelector('#messages-table tbody');
+  tbody.innerHTML = '';
+  document.getElementById('messages-empty').style.display = messages.length ? 'none' : 'block';
+  for (const m of messages) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(m.direction)}</td><td>${esc(m.direction === 'outbound' ? m.to_addr : m.from_addr)}</td><td>${esc(m.subject)}</td><td>${fmtDate(m.received_at)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function loadOutreachLog() {
+  const { log } = await api(`/api/v1/me/mailboxes/${encodeURIComponent(currentMailbox)}/outreach-log`);
+  const tbody = document.querySelector('#outreach-table tbody');
+  tbody.innerHTML = '';
+  document.getElementById('outreach-empty').style.display = log.length ? 'none' : 'block';
+  for (const entry of log) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${esc(entry.to_addr)}</td><td>${esc(entry.subject)}</td><td>${fmtDate(entry.sent_at)}</td><td>${esc(entry.sent_by_name || entry.sent_by_email)}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+document.getElementById('c-to').addEventListener('blur', async (e) => {
+  const to = e.target.value.trim();
+  const warning = document.getElementById('compose-warning');
+  warning.className = '';
+  warning.textContent = '';
+  if (!to || !currentMailbox) return;
+  try {
+    const result = await api(`/api/v1/me/mailboxes/${encodeURIComponent(currentMailbox)}/outreach-log?to=${encodeURIComponent(to)}`);
+    if (result.alreadyContacted) {
+      warning.className = 'contacted';
+      warning.textContent = `Already contacted by ${result.lastContact.sent_by_name || result.lastContact.sent_by_email} on ${fmtDate(result.lastContact.sent_at)} — "${result.lastContact.subject}"`;
+    } else {
+      warning.className = 'clear';
+      warning.textContent = 'No prior contact on record — clear to reach out.';
+    }
+  } catch (err) { /* non-fatal - don't block compose on a check failure */ }
+});
+
+document.getElementById('compose-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const to = document.getElementById('c-to').value.trim();
+  const subject = document.getElementById('c-subject').value.trim();
+  const body = document.getElementById('c-body').value.trim();
+  const btn = document.getElementById('send-btn');
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    await api(`/api/v1/me/mailboxes/${encodeURIComponent(currentMailbox)}/send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ to, subject, text: body }),
+    });
+    e.target.reset();
+    document.getElementById('compose-warning').className = '';
+    await Promise.all([loadMessages(), loadOutreachLog()]);
+  } catch (err) {
+    alert('Send failed: ' + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+});
+
+document.getElementById('logout-btn').addEventListener('click', () => auth.logout());
+
+window.addEventListener('authfor-success', async (e) => {
+  document.getElementById('who').textContent = e.detail?.email || '';
+  document.getElementById('logout-btn').style.display = 'inline-block';
+  document.getElementById('main').classList.add('ready');
+  try {
+    await loadMailboxes();
+  } catch (err) {
+    document.getElementById('main').innerHTML = `<p style="grid-column:1/-1;color:#ff8a65">${esc(err.message)} — ask an admin to grant your email access to a mailbox.</p>`;
+  }
+});
+
+auth.init();
+</script>
+
+</body>
+</html>
