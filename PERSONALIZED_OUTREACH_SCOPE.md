@@ -5,6 +5,26 @@ three phases on the same foundation (the outreach tracker from
 AUTHFOR_MULTIUSER_SCOPE.md) rather than one monolithic build - they
 have very different risk profiles and none blocks the others.
 
+**Correction (2026-09-10, after this doc was written): Phase 1 is
+redundant with real, already-shipped work - do not build it here.**
+Later the same session as this doc, a product-split decision was made:
+mailguyai.com stays the mailbox-hosting/creation product, and the
+outreach-tracking/sales-engagement product (contacts, outreach log,
+stale-contact follow-up) was built on **salesfactorai.com** instead -
+its own dedicated D1 (`contacts`, `outreach_log` tables), a live
+`GET /api/v1/stale?days=` route, and a real `dashboard.html` UI. That
+is functionally identical to what Phase 1 below describes building on
+mailguyai.com. Building it again here would be duplicate maintenance
+for a decision already made, not net-new value. If mailguyai.com later
+wants a "who have we contacted" view inside `inbox.html`, the right
+move is calling salesfactorai.com's API (cross-venture, same as any
+other shared-capability wiring in this portfolio - see mascom/CLAUDE.md's
+"Build capability-first, not custom-first"), not re-implementing the
+tables and routes. Phases 2-3 below are more naturally salesfactorai.com
+features too, for the same reason (they're outreach/sales-engagement,
+not mailbox hosting) - re-evaluate before starting either there instead
+of here.
+
 ## Real technical constraint, stated up front
 
 **A scroll-driven "your site morphs into our proposed design" effect
