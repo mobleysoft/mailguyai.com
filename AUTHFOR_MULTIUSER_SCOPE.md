@@ -215,6 +215,19 @@ Live-verified at the real domain. Steps 7-8 remain: provisioning
 Routing verification and Mobley's
 registration call for Ron, per below.
 
+**Step 7 checked, real blocker confirmed (2026-09-10)**: queried
+Cloudflare's Email Routing API directly for weylandai.com's zone
+(`GET /zones/:id/email/routing`) rather than assuming - result:
+`"enabled": false, "status": "unconfigured"`. Email Routing is not on
+for this zone at all. `modules/provisioning.js`'s own comment already
+documents enabling it as "a one-time, human-reviewed zone change," not
+something `createMailbox` does itself - correctly did not attempt to
+enable it autonomously here, since it can interact with existing MX
+records for the whole domain. **Real next action needed from John**:
+enable Email Routing on weylandai.com's zone (Cloudflare dashboard or
+a reviewed API call), after which step 7 (`POST /api/v1/mailboxes` for
+`outreach@weylandai.com`) is a one-call, low-risk step.
+
 Steps 1-4 and 6 have no dependency on Ron's account existing and can
 be built, tested, and deployed now. Steps 7-8 are the real-world
 activation steps, gated on Email Routing verification and Mobley's
