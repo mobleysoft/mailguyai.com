@@ -207,7 +207,10 @@ at the real domain. Fixed by adding a narrow `mailguyai.com/api/*` route
 to `mailguyai-com-worker` (the landing page keeps serving `/` via
 mascom-edge, untouched) - now genuinely live-verified at the real domain
 (`/api/v1/health` returns real JSON, `/api/v1/me` returns a real 401).
-Steps 6-8 remain: `inbox.html` UI is not started; provisioning
+**Step 6 done (2026-09-10)**: `inbox.html` built and deployed - mailbox
+list with role, message list, compose form, and the live outreach-log
+"already contacted?" check inline in compose (blur the `to` field).
+Live-verified at the real domain. Steps 7-8 remain: provisioning
 `outreach@weylandai.com` and granting real access are gated on Email
 Routing verification and Mobley's
 registration call for Ron, per below.
