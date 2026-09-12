@@ -8,6 +8,12 @@ CREATE TABLE IF NOT EXISTS mailboxes (
   domain TEXT NOT NULL,
   owner_type TEXT NOT NULL,      -- 'internal' | 'external'
   owner_ref TEXT,                 -- e.g. venture domain, user id, subsidiary name
+  -- Tenant convention (decided 2026-09-12, see OUTREACH_PROVISIONING_ROLLOUT.md):
+  -- for a venture's own outreach@<domain> mailbox, owner_type='internal' and
+  -- owner_ref=<that domain> IS the real "this subsidiary uses mailguyai"
+  -- signal across the 123-venture estate. No separate tenants/ventures table
+  -- exists or is needed for this - `users` (human AuthFor identities, see
+  -- migration 0002) is a different, deliberately separate concept.
   plan TEXT NOT NULL DEFAULT 'internal',  -- 'internal' (no billing) | a billed plan slug
   created_at TEXT NOT NULL
 );

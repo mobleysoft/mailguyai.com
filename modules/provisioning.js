@@ -68,6 +68,11 @@ export async function verifyEmailRoutingEnabled(env, domain) {
  * and records the mailbox so inbound.js/mailbox-store.js can resolve it.
  */
 export async function createMailbox(env, { address, domain, owner_type, owner_ref, plan }) {
+  // Tenant convention (see OUTREACH_PROVISIONING_ROLLOUT.md, 2026-09-12): for
+  // a venture's own outreach@<domain> address, pass owner_type: 'internal'
+  // and owner_ref: <domain> — that pairing is the real "this subsidiary is a
+  // tenant of mailguyai" signal used across all 123 estate ventures. Do not
+  // leave owner_ref null for a venture mailbox; it's how tenancy is queried.
   if (!address || !domain || !owner_type) {
     return { ok: false, error: 'address, domain, and owner_type are required' };
   }
