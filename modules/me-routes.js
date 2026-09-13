@@ -16,6 +16,7 @@
 import { authenticateViaAuthFor, hasMailboxRole, grantMailboxAccess, listAccessibleMailboxes } from './authfor.js';
 import { getMailboxByAddress, listMessages, getMessage, storeMessage, getOutreachLog, checkOutreachContact } from './mailbox-store.js';
 import { sendViaCloudflareSMTP, buildMimeMessage } from './outbound.js';
+import { draftReply } from './ai-draft.js';
 
 const CORS = {
   'Access-Control-Allow-Origin': '*',
@@ -105,6 +106,28 @@ export async function handleMeRoutes(request, env, ctx) {
     const allowed = await hasMailboxRole(env, msg.mailbox_id, user.id, ['owner', 'read', 'send']);
     if (!allowed) return err('Forbidden', 'FORBIDDEN', 403);
     return json(msg);
+  }
+
+  // --- POST /api/v1/me/messages/:id/draft-reply ---
+  // Real AI understanding, not the rule-based scorer - reads a stored
+  // message and returns a draft reply for the human to review and send
+  // via the route above. Never sends anything itself.
+  const draftMatch = path.match(/^\/api\/v1\/me\/messages\/([^/]+)\/draft-reply$/);
+  if (method === 'POST' && draftMatch) {
+    const { user, error: userErr } = await requireUser(request, env);
+    if (userErr) return userErr;
+    const messageId = decodeURIComponent(draftMatch[1]);
+    const msg = await getMessage(env, messageId);
+    if (!msg) return err('Not found', 'NOT_FOUND', 404);
+    const allowed = await hasMailboxRole(env, msg.mailbox_id, user.id, ['owner', 'read', 'send']);
+    if (!allowed) return err('Forbidden', 'FORBIDDEN', 403);
+
+    try {
+      const result = await draftReply(env, msg);
+      return json({ message_id: messageId, ...result });
+    } catch (e) {
+      return err(e?.message || 'Draft generation failed', 'AI_DRAFT_FAILED', 502);
+    }
   }
 
   // --- POST /api/v1/me/mailboxes/:address/send ---

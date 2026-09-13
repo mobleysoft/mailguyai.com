@@ -313,3 +313,72 @@ test('POST .../access: real validation rejects an unrecognized role', async () =
   const resp = await handleMeRoutes(req, env, {});
   assert.equal(resp.status, 400);
 });
+
+// --- POST /api/v1/me/messages/:id/draft-reply ---
+
+test('POST .../draft-reply: real permission check rejects a user with no grant on the message\'s mailbox', async () => {
+  const env = fakeEnv({
+    mailboxes: [{ id: 'mb1', address: 'outreach@weylandai.com', domain: 'weylandai.com' }],
+    users: [{ id: 'u-stranger', email: 'stranger@example.com', name: 'Stranger' }],
+    messages: [{ id: 'm1', mailbox_id: 'mb1', direction: 'inbound', from_addr: 'lead@acme.com', to_addr: 'outreach@weylandai.com', subject: 'Pricing?', r2_key: 'messages/m1.eml', received_at: '2026-09-01T00:00:00Z', sent_by_user_id: null }],
+  });
+  await env.MAILGUY_R2.put('messages/m1.eml', 'What does the Pro plan cost?');
+  const restore = fakeFetchOnce(async () => ({ ok: true, json: async () => ({ email: 'stranger@example.com', name: 'Stranger' }) }));
+  try {
+    const req = authedRequest('https://mailguyai.com/api/v1/me/messages/m1/draft-reply', { method: 'POST' });
+    const resp = await handleMeRoutes(req, env, {});
+    assert.equal(resp.status, 403);
+  } finally {
+    restore();
+  }
+});
+
+test('POST .../draft-reply: real happy path reads the stored message and returns an AI-drafted reply, without sending anything', async () => {
+  const env = fakeEnv({
+    mailboxes: [{ id: 'mb1', address: 'outreach@weylandai.com', domain: 'weylandai.com' }],
+    users: [{ id: 'u-ron', email: 'ron@example.com', name: 'Ron' }],
+    access: [{ mailbox_id: 'mb1', user_id: 'u-ron', role: 'read' }],
+    messages: [{ id: 'm1', mailbox_id: 'mb1', direction: 'inbound', from_addr: 'lead@acme.com', to_addr: 'outreach@weylandai.com', subject: 'Pricing?', r2_key: 'messages/m1.eml', received_at: '2026-09-01T00:00:00Z', sent_by_user_id: null }],
+  });
+  await env.MAILGUY_R2.put('messages/m1.eml', 'What does the Pro plan cost?');
+  env.LLAMA_ACCESS_CLIENT_ID = 'id123';
+  env.LLAMA_ACCESS_CLIENT_SECRET = 'secret456';
+
+  const restore = fakeFetchOnce(async (url) => {
+    if (String(url).includes('authfor.com')) return { ok: true, json: async () => ({ email: 'ron@example.com', name: 'Ron' }) };
+    return { ok: true, json: async () => ({ choices: [{ message: { content: 'The Pro plan is $29/mo.' } }] }) };
+  });
+  try {
+    const req = authedRequest('https://mailguyai.com/api/v1/me/messages/m1/draft-reply', { method: 'POST' });
+    const resp = await handleMeRoutes(req, env, {});
+    assert.equal(resp.status, 200);
+    const data = await resp.json();
+    assert.equal(data.draft, 'The Pro plan is $29/mo.');
+    assert.equal(data.needsReply, true);
+    assert.equal(env._sentEmails.length, 0); // a draft is not a send
+  } finally {
+    restore();
+  }
+});
+
+test('POST .../draft-reply: real behavior surfaces a bridge failure as a real 502, not a fabricated draft', async () => {
+  const env = fakeEnv({
+    mailboxes: [{ id: 'mb1', address: 'outreach@weylandai.com', domain: 'weylandai.com' }],
+    users: [{ id: 'u-ron', email: 'ron@example.com', name: 'Ron' }],
+    access: [{ mailbox_id: 'mb1', user_id: 'u-ron', role: 'owner' }],
+    messages: [{ id: 'm1', mailbox_id: 'mb1', direction: 'inbound', from_addr: 'lead@acme.com', to_addr: 'outreach@weylandai.com', subject: 'Pricing?', r2_key: 'messages/m1.eml', received_at: '2026-09-01T00:00:00Z', sent_by_user_id: null }],
+  });
+  await env.MAILGUY_R2.put('messages/m1.eml', 'What does the Pro plan cost?');
+  // LLAMA_ACCESS_CLIENT_ID/SECRET deliberately left unconfigured on this env.
+
+  const restore = fakeFetchOnce(async () => ({ ok: true, json: async () => ({ email: 'ron@example.com', name: 'Ron' }) }));
+  try {
+    const req = authedRequest('https://mailguyai.com/api/v1/me/messages/m1/draft-reply', { method: 'POST' });
+    const resp = await handleMeRoutes(req, env, {});
+    assert.equal(resp.status, 502);
+    const data = await resp.json();
+    assert.equal(data.code, 'AI_DRAFT_FAILED');
+  } finally {
+    restore();
+  }
+});

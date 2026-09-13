@@ -34,8 +34,18 @@
  *   GET    /api/v1/me/mailboxes/:address/messages
  *   GET    /api/v1/me/mailboxes/:address/outreach-log
  *   GET    /api/v1/me/messages/:id
+ *   POST   /api/v1/me/messages/:id/draft-reply  AI-drafted reply (see modules/ai-draft.js) — draft only, never sends
  *   POST   /api/v1/me/mailboxes/:address/send
  *   POST   /api/v1/mailboxes/:address/access  Grant a user access (admin-key gated)
+ *
+ *   POST /api/v1/me/messages/:id/draft-reply requires two additional
+ *   secrets NOT YET SET on this Worker (real blocker, see git log/
+ *   AUTHFOR_MULTIUSER_SCOPE.md-style notes at commit time): LLAMA_ACCESS_CLIENT_ID
+ *   and LLAMA_ACCESS_CLIENT_SECRET — the same Cloudflare Access service-token
+ *   pair mobley-venture-fleet-a already uses to reach llama.mobleysoft.com.
+ *   Until `wrangler secret put` is run for both, this route is real,
+ *   tested, and deployed but returns a real 502 (AI_DRAFT_FAILED) rather
+ *   than a fabricated draft — see modules/ai-draft.js's own guard.
  */
 
 import { sendViaCloudflareSMTP } from './modules/outbound.js';
