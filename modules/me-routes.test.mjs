@@ -219,6 +219,61 @@ test('POST .../send: real happy path sends via SEND_EMAIL, persists to D1/R2 wit
   }
 });
 
+test('POST .../send: real behavior logs the send to salesfactorai.com\'s shared outreach tracker, forwarding the same Bearer token', async () => {
+  const env = fakeEnv({
+    mailboxes: [{ id: 'mb1', address: 'outreach@weylandai.com', domain: 'weylandai.com' }],
+    users: [{ id: 'u-ron', email: 'ron@example.com', name: 'Ron' }],
+    access: [{ mailbox_id: 'mb1', user_id: 'u-ron', role: 'send' }],
+  });
+  const calls = [];
+  const restore = fakeFetchOnce(async (url, init) => {
+    calls.push({ url: String(url), init });
+    return { ok: true, json: async () => ({ email: 'ron@example.com', name: 'Ron' }) };
+  });
+  try {
+    const req = authedRequest('https://mailguyai.com/api/v1/me/mailboxes/outreach@weylandai.com/send', {
+      method: 'POST',
+      body: { to: 'lead@acme.com', subject: 'Intro', text: 'Hello there' },
+      token: 'ron-token',
+    });
+    const resp = await handleMeRoutes(req, env, {});
+    assert.equal(resp.status, 201);
+
+    const sfCall = calls.find((c) => c.url === 'https://salesfactorai.com/api/v1/outreach');
+    assert.ok(sfCall, 'expected a real call to salesfactorai.com/api/v1/outreach');
+    assert.equal(sfCall.init.headers.Authorization, 'Bearer ron-token');
+    const sentBody = JSON.parse(sfCall.init.body);
+    assert.equal(sentBody.email, 'lead@acme.com');
+    assert.equal(sentBody.subject, 'Intro');
+    assert.equal(sentBody.channel, 'email');
+  } finally {
+    restore();
+  }
+});
+
+test('POST .../send: real behavior still succeeds even if salesfactorai.com\'s outreach log is unreachable', async () => {
+  const env = fakeEnv({
+    mailboxes: [{ id: 'mb1', address: 'outreach@weylandai.com', domain: 'weylandai.com' }],
+    users: [{ id: 'u-ron', email: 'ron@example.com', name: 'Ron' }],
+    access: [{ mailbox_id: 'mb1', user_id: 'u-ron', role: 'send' }],
+  });
+  const restore = fakeFetchOnce(async (url) => {
+    if (String(url).includes('authfor.com')) return { ok: true, json: async () => ({ email: 'ron@example.com', name: 'Ron' }) };
+    throw new Error('salesfactorai.com is down');
+  });
+  try {
+    const req = authedRequest('https://mailguyai.com/api/v1/me/mailboxes/outreach@weylandai.com/send', {
+      method: 'POST',
+      body: { to: 'lead@acme.com', subject: 'Intro', text: 'Hello there' },
+    });
+    const resp = await handleMeRoutes(req, env, {});
+    assert.equal(resp.status, 201); // the real send + persistence already succeeded
+    assert.equal(env._sentEmails.length, 1);
+  } finally {
+    restore();
+  }
+});
+
 // --- GET /api/v1/me/mailboxes/:address/outreach-log ---
 
 test('GET .../outreach-log?to=: real behavior reports a genuine prior contact, not a false negative', async () => {

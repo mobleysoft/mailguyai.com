@@ -165,6 +165,8 @@ export async function handleMeRoutes(request, env, ctx) {
       rawMime, sentByUserId: user.id,
     });
 
+    await logToSalesFactor(request, env, ctx, { to, subject });
+
     return json({ success: true, id: stored.id, mailbox: mailbox.address }, 201);
   }
 
@@ -193,4 +195,39 @@ export async function handleMeRoutes(request, env, ctx) {
 function isAdminAuthorized(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
   return authHeader.startsWith('Bearer ') && authHeader.slice(7) === env.MAILGUY_API_KEY;
+}
+
+const SALESFACTOR_OUTREACH_URL = 'https://salesfactorai.com/api/v1/outreach';
+
+/**
+ * Best-effort cross-venture log: tell salesfactorai.com's shared team
+ * outreach tracker about a real send, so its "don't butt heads" dedup
+ * (checkOutreach) has real data instead of only manual dashboard entries.
+ * Forwards the same AuthFor Bearer token the sender already authenticated
+ * with - both ventures verify against the same central AuthFor identity
+ * (see modules/authfor.js's header comment), so it resolves to the same
+ * person there IF they also have a salesfactorai.com teammate row (added
+ * via its admin-key-gated POST /api/v1/team - a real, separate step, not
+ * automatic). Never blocks or fails the actual send: salesfactorai.com
+ * being down, or the sender not yet being a salesfactorai.com teammate,
+ * is a real, expected case, not an error worth surfacing to the user who
+ * just successfully sent an email.
+ */
+function logToSalesFactor(request, env, ctx, { to, subject }) {
+  const promise = fetch(SALESFACTOR_OUTREACH_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: request.headers.get('Authorization') || '',
+    },
+    body: JSON.stringify({ email: to, channel: 'email', subject }),
+  }).catch((e) => {
+    console.log('[MailguyAI] salesfactorai.com outreach log failed (non-fatal):', e?.message || e);
+  });
+
+  if (ctx && typeof ctx.waitUntil === 'function') {
+    ctx.waitUntil(promise);
+    return Promise.resolve();
+  }
+  return promise;
 }
