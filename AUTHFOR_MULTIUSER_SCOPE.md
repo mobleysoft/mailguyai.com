@@ -256,6 +256,11 @@ future session doesn't have to rediscover it):
   and created the identical rule for `outreach@weylandai.com` on
   weylandai.com's zone via `POST /zones/:id/email/routing/rules`.
 
-Step 8 (granting John/Ron real access) remains gated on Mobley's own
-AuthFor registration call for Ron - `mailguyai-com-db`'s `users` table
-still has 0 rows as of this check.
+**Step 8 DONE (2026-09-12).** Verified via direct `SELECT` against
+`mailguyai-com-db`: `users` now has 3 real rows (`jmobleyworks@gmail.com`
+/ John Mobley, `ron.helms@pm.me` / Ron Helms, `jimsjeep@hotmail.com` /
+James), and `mailbox_access` grants both John and Ron `owner` role on
+`outreach@weylandai.com` (`granted_at: 2026-09-12 16:08:06`, `granted_by:
+"john_direct_instruction"`) - real per-user AuthFor-backed access, not a
+shared credential. This closes the loop opened in step 7: the mailbox
+existed but had no human owners until this grant.
