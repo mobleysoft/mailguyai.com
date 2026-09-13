@@ -264,13 +264,21 @@ its orphaned SPF fragment before being included.
   pass and remains correctly empty pending Ron's real AuthFor registration
   — see `AUTHFOR_MULTIUSER_SCOPE.md`, step 8. Not conflated with the
   tenant model above.
-- `wrangler d1 migrations list mailguyai-com-db --remote` reports both
-  `0001_init.sql` and `0002_multiuser_and_outreach_log.sql` as still
-  "to be applied" even though their tables demonstrably exist — both were
-  originally applied via direct SQL execution rather than
-  `wrangler d1 migrations apply`, so the `d1_migrations` bookkeeping table
-  was never populated. Pre-existing gap, unrelated to this pass (not
-  touched, and 0002 isn't safe to blindly re-run — its `ALTER TABLE ...
-  ADD COLUMN` isn't idempotent). Worth a real fix in a future session
-  (e.g. manually inserting the two bookkeeping rows) so this doesn't
-  surprise someone running migrations later.
+- **Fixed (2026-09-13)**: `wrangler d1 migrations list mailguyai-com-db
+  --remote` used to report both `0001_init.sql` and
+  `0002_multiuser_and_outreach_log.sql` as still "to be applied" even
+  though their tables demonstrably exist — both were originally applied
+  via direct SQL execution rather than `wrangler d1 migrations apply`, so
+  the `d1_migrations` bookkeeping table was never created. Fixed by
+  creating `d1_migrations` (wrangler's own expected schema: `id INTEGER
+  PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at DATETIME`) and
+  backfilling both real filenames with `datetime('now')` as their applied
+  timestamp — the actual historical apply time isn't recorded anywhere,
+  and wrangler only ever reads this table to decide what's pending, not
+  to report a real historical audit trail, so an accurate-enough backfill
+  timestamp is the correct fix, not a gap. Re-verified live:
+  `wrangler d1 migrations list` now reports "No migrations to apply!" —
+  a real future `0003_*.sql` will apply cleanly against this bookkeeping
+  instead of wrangler trying to blindly replay 0001/0002 (0002's
+  non-idempotent `ALTER TABLE ... ADD COLUMN` would have failed loudly
+  the first time anyone ran `wrangler d1 migrations apply` for real).
