@@ -31,6 +31,13 @@
   #compose-warning.clear { display: block; background: rgba(76,175,80,0.1); color: #4caf50; border: 1px solid rgba(76,175,80,0.25); }
   .empty { color: #666; font-size: 13px; padding: 8px 0; }
   .send-role-only { display: none; }
+  .draft-btn { background: transparent; border: 1px solid rgba(255,176,32,0.3); color: #ffb020; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+  .draft-btn:disabled { opacity: 0.5; cursor: default; }
+  #draft-reply-box { margin-top: 10px; padding: 12px; border-radius: 6px; background: #121826; border: 1px solid rgba(255,176,32,0.2); }
+  #draft-reply-box textarea { width: 100%; min-height: 90px; background: #0a0e14; color: #f5f1e8; border: 1px solid #333; border-radius: 6px; padding: 8px 10px; font-size: 13px; box-sizing: border-box; font-family: inherit; margin-bottom: 8px; }
+  #draft-reply-box .note { font-size: 12px; color: #9aa4b8; margin-bottom: 8px; }
+  #draft-reply-box .err { font-size: 12px; color: #ff8a65; }
+  #draft-reply-box button.use-btn { background: #ffb020; color: #20150a; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -75,10 +82,14 @@
     <section>
       <h2>Messages</h2>
       <table id="messages-table">
-        <thead><tr><th>Direction</th><th>From/To</th><th>Subject</th><th>Received</th></tr></thead>
+        <thead><tr><th>Direction</th><th>From/To</th><th>Subject</th><th>Received</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="empty" id="messages-empty" style="display:none">No messages stored for this mailbox yet.</div>
+      <div id="draft-reply-box" style="display:none">
+        <h2>AI-drafted reply <span style="text-transform:none;color:#666;font-weight:400">— review before sending, nothing is sent automatically</span></h2>
+        <div id="draft-reply-content"></div>
+      </div>
     </section>
   </div>
 </main>
@@ -139,10 +150,51 @@ async function loadMessages() {
   const tbody = document.querySelector('#messages-table tbody');
   tbody.innerHTML = '';
   document.getElementById('messages-empty').style.display = messages.length ? 'none' : 'block';
+  document.getElementById('draft-reply-box').style.display = 'none';
   for (const m of messages) {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${esc(m.direction)}</td><td>${esc(m.direction === 'outbound' ? m.to_addr : m.from_addr)}</td><td>${esc(m.subject)}</td><td>${fmtDate(m.received_at)}</td>`;
+    const actionCell = m.direction === 'inbound' && ['owner', 'read', 'send'].includes(currentRole)
+      ? `<button class="draft-btn" data-id="${esc(m.id)}" data-from="${esc(m.from_addr)}" data-subject="${esc(m.subject)}">Draft reply</button>`
+      : '';
+    tr.innerHTML = `<td>${esc(m.direction)}</td><td>${esc(m.direction === 'outbound' ? m.to_addr : m.from_addr)}</td><td>${esc(m.subject)}</td><td>${fmtDate(m.received_at)}</td><td>${actionCell}</td>`;
     tbody.appendChild(tr);
+  }
+  tbody.querySelectorAll('.draft-btn').forEach((btn) => {
+    btn.addEventListener('click', () => requestDraftReply(btn.dataset.id, btn.dataset.from, btn.dataset.subject, btn));
+  });
+}
+
+async function requestDraftReply(messageId, fromAddr, subject, btn) {
+  const box = document.getElementById('draft-reply-box');
+  const content = document.getElementById('draft-reply-content');
+  box.style.display = 'block';
+  content.innerHTML = '<div class="note">Drafting…</div>';
+  btn.disabled = true;
+  try {
+    const result = await api(`/api/v1/me/messages/${encodeURIComponent(messageId)}/draft-reply`, { method: 'POST' });
+    if (!result.needsReply || !result.draft) {
+      content.innerHTML = '<div class="note">The assistant judged this message doesn\'t need a reply (spam, newsletter, or no-action-needed).</div>';
+      return;
+    }
+    const canCompose = ['owner', 'send'].includes(currentRole);
+    content.innerHTML = `
+      <div class="note">Drafted from "${esc(subject)}" — review below, nothing is sent until you press Send in Compose.</div>
+      <textarea id="draft-text">${esc(result.draft)}</textarea>
+      ${canCompose ? '<button class="use-btn" type="button">Use as reply</button>' : '<div class="note">Your role on this mailbox is read-only — an owner or sender must send this.</div>'}
+    `;
+    if (canCompose) {
+      content.querySelector('.use-btn').addEventListener('click', () => {
+        document.getElementById('c-to').value = fromAddr;
+        document.getElementById('c-subject').value = subject.toLowerCase().startsWith('re:') ? subject : `Re: ${subject}`;
+        document.getElementById('c-body').value = content.querySelector('#draft-text').value;
+        document.getElementById('c-to').dispatchEvent(new Event('blur'));
+        document.getElementById('compose-section').scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+  } catch (err) {
+    content.innerHTML = `<div class="err">Draft failed: ${esc(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
   }
 }
 
