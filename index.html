@@ -92,57 +92,26 @@
   </div>
 </main>
 <footer>mailguyai.com</footer>
-<script>
+<script type="module">
+import { scoreEmailPriority } from './modules/triage-score.js';
+
 function scoreEmail() {
-  var sender = document.getElementById('sender').value.toLowerCase();
-  var subject = document.getElementById('subject').value.toLowerCase();
-  var body = document.getElementById('body').value.toLowerCase();
-  var text = subject + ' ' + body;
-  var score = 0;
-  var reasons = [];
+  var sender = document.getElementById('sender').value;
+  var subject = document.getElementById('subject').value;
+  var body = document.getElementById('body').value;
+  var result = scoreEmailPriority({ sender: sender, subject: subject, body: body });
 
-  var urgentWords = ['urgent', 'asap', 'today', 'deadline', 'action required', 'immediately', 'eod'];
-  urgentWords.forEach(function(w) {
-    if (text.indexOf(w) !== -1) { score += 15; reasons.push('Contains urgency phrase "' + w + '" (+15)'); }
-  });
-
-  var questionMark = text.indexOf('?') !== -1;
-  if (questionMark) { score += 10; reasons.push('Contains a direct question (+10)'); }
-
-  var replyThread = subject.indexOf('re:') === 0 || subject.indexOf('re:') !== -1;
-  if (replyThread) { score += 10; reasons.push('Part of an existing thread ("Re:") (+10)'); }
-
-  var noReply = sender.indexOf('noreply') !== -1 || sender.indexOf('no-reply') !== -1 || sender.indexOf('notifications@') !== -1;
-  if (noReply) { score -= 30; reasons.push('Automated/no-reply sender (-30)'); }
-
-  var newsletter = text.indexOf('unsubscribe') !== -1 || text.indexOf('newsletter') !== -1;
-  if (newsletter) { score -= 20; reasons.push('Looks like bulk/newsletter content (-20)'); }
-
-  if (!sender) { reasons.push('No sender provided — scoring subject/body only'); }
-
-  score = Math.max(0, Math.min(100, score + 40));
-
-  var band;
-  if (score >= 70) band = 'High priority';
-  else if (score >= 45) band = 'Normal priority';
-  else band = 'Low priority / can wait';
-
-  document.getElementById('scoreOut').textContent = score + '/100 — ' + band;
+  document.getElementById('scoreOut').textContent = result.score + '/100 — ' + result.band;
   var list = document.getElementById('reasonsOut');
   list.innerHTML = '';
-  if (reasons.length === 0) {
+  result.reasons.forEach(function(r) {
     var li = document.createElement('li');
-    li.textContent = 'No strong signals found — scored at baseline.';
+    li.textContent = r;
     list.appendChild(li);
-  } else {
-    reasons.forEach(function(r) {
-      var li = document.createElement('li');
-      li.textContent = r;
-      list.appendChild(li);
-    });
-  }
+  });
   document.getElementById('triageResult').classList.add('show');
 }
+window.scoreEmail = scoreEmail;
 </script>
 </body>
 </html>

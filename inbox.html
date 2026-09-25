@@ -38,6 +38,10 @@
   #draft-reply-box .note { font-size: 12px; color: #9aa4b8; margin-bottom: 8px; }
   #draft-reply-box .err { font-size: 12px; color: #ff8a65; }
   #draft-reply-box button.use-btn { background: #ffb020; color: #20150a; border: none; border-radius: 6px; padding: 6px 12px; font-weight: 600; cursor: pointer; font-size: 12px; }
+  .priority { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid; white-space: nowrap; }
+  .priority.high { color: #ff8a65; border-color: rgba(255,138,101,0.4); background: rgba(255,138,101,0.08); }
+  .priority.normal { color: #ffb020; border-color: rgba(255,176,32,0.3); background: rgba(255,176,32,0.06); }
+  .priority.low { color: #9aa4b8; border-color: rgba(154,164,184,0.25); }
 </style>
 </head>
 <body>
@@ -81,8 +85,9 @@
 
     <section>
       <h2>Messages</h2>
+      <p style="color:#666;font-size:11px;margin:0 0 10px;">Priority is the same transparent rule-based scorer shown on the landing page — hover a badge for why. Not a trained model.</p>
       <table id="messages-table">
-        <thead><tr><th>Direction</th><th>From/To</th><th>Subject</th><th>Received</th><th></th></tr></thead>
+        <thead><tr><th>Direction</th><th>From/To</th><th>Subject</th><th>Priority</th><th>Received</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
       <div class="empty" id="messages-empty" style="display:none">No messages stored for this mailbox yet.</div>
@@ -95,8 +100,16 @@
 </main>
 
 <script src="/assets/authfor-integration-standard.js"></script>
-<script>
+<script type="module">
+import { scoreEmailPriority } from './modules/triage-score.js';
+
 const API_BASE = window.location.origin;
+
+function renderPriorityBadge(subject, fromAddr) {
+  const { score, band, reasons } = scoreEmailPriority({ sender: fromAddr, subject });
+  const cls = band === 'High priority' ? 'high' : band === 'Normal priority' ? 'normal' : 'low';
+  return `<span class="priority ${cls}" title="${esc(reasons.join('; '))}">${score} · ${esc(band)}</span>`;
+}
 
 const auth = new AuthForStandard({
   ventureName: 'mailguyai.com',
@@ -156,7 +169,8 @@ async function loadMessages() {
     const actionCell = m.direction === 'inbound' && ['owner', 'read', 'send'].includes(currentRole)
       ? `<button class="draft-btn" data-id="${esc(m.id)}" data-from="${esc(m.from_addr)}" data-subject="${esc(m.subject)}">Draft reply</button>`
       : '';
-    tr.innerHTML = `<td>${esc(m.direction)}</td><td>${esc(m.direction === 'outbound' ? m.to_addr : m.from_addr)}</td><td>${esc(m.subject)}</td><td>${fmtDate(m.received_at)}</td><td>${actionCell}</td>`;
+    const priorityCell = m.direction === 'inbound' ? renderPriorityBadge(m.subject, m.from_addr) : '—';
+    tr.innerHTML = `<td>${esc(m.direction)}</td><td>${esc(m.direction === 'outbound' ? m.to_addr : m.from_addr)}</td><td>${esc(m.subject)}</td><td>${priorityCell}</td><td>${fmtDate(m.received_at)}</td><td>${actionCell}</td>`;
     tbody.appendChild(tr);
   }
   tbody.querySelectorAll('.draft-btn').forEach((btn) => {
