@@ -71,9 +71,23 @@ function err(message, code = 'ERROR', status = 400) {
   return json({ error: message, code }, status);
 }
 
+// Each caller can hold its own key, so rotating one never breaks another.
+// MAILGUY_API_KEY is the original shared key; MAILGUY_KEY_AUTHFOR belongs to AuthFor
+// (its sign-in codes and password resets), added 2026-10-07 after AuthFor's sends
+// were found failing with 401 against a key that no longer matched.
+function sameSecret(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || !b) return false;
+  const x = new TextEncoder().encode(a), y = new TextEncoder().encode(b);
+  let diff = x.length ^ y.length;
+  for (let i = 0; i < Math.max(x.length, y.length); i++) diff |= (x[i] || 0) ^ (y[i] || 0);
+  return diff === 0;
+}
+
 function isAuthorized(request, env) {
   const authHeader = request.headers.get('Authorization') || '';
-  return authHeader.startsWith('Bearer ') && authHeader.slice(7) === env.MAILGUY_API_KEY;
+  if (!authHeader.startsWith('Bearer ')) return false;
+  const presented = authHeader.slice(7);
+  return sameSecret(presented, env.MAILGUY_API_KEY) || sameSecret(presented, env.MAILGUY_KEY_AUTHFOR);
 }
 
 async function landingPage(env) {
