@@ -160,8 +160,9 @@ export default {
       const fromLabel = from_name || env.DEFAULT_FROM_NAME || 'MailguyAI';
       const mailId    = crypto.randomUUID();
 
+      let delivery = null;
       try {
-        await sendViaCloudflareSMTP(env, {
+        delivery = await sendViaCloudflareSMTP(env, {
           from: fromAddr,
           fromName: fromLabel,
           to,
@@ -175,7 +176,7 @@ export default {
       }
 
       // Non-blocking KV log
-      const logEntry = { id: mailId, status: 'sent', to, subject, sentAt: new Date().toISOString() };
+      const logEntry = { id: mailId, status: 'sent', to, subject, sentAt: new Date().toISOString(), messageId: delivery && delivery.messageId, from: delivery && delivery.from };
       ctx.waitUntil(env.MAILGUY_KV.put(`mail:${mailId}`, JSON.stringify(logEntry), { expirationTtl: 86400 * 30 }));
 
       // Non-blocking billing event to VendyAI
@@ -187,7 +188,8 @@ export default {
         }).catch(e => console.error('[MailguyAI] Billing event failed:', e))
       );
 
-      return json({ success: true, id: mailId, engine: 'cloudflare-native' });
+      return json({ success: true, id: mailId, engine: 'cloudflare-native',
+        message_id: delivery && delivery.messageId, sent_from: delivery && delivery.from, api: delivery && delivery.api });
     }
 
     // --- Legacy KV delivery log lookup ---
