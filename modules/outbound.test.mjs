@@ -94,3 +94,16 @@ test('the legacy fallback sends that MIME when the binding refuses the structure
   assert.equal(decodeWords(header(mime, 'Subject')), 'Café');
   assert.equal(calls[1].from, 'auth@weylandai.com');
 });
+
+test('a caller Reply-To reaches the structured send and the legacy MIME header', async () => {
+  const sent = [];
+  const env = { SENDING_DOMAINS: 'mailguyai.com,weylandai.com', SEND_EMAIL: { async send(m) { sent.push(m); return { messageId: 'x' }; } } };
+  await sendViaCloudflareSMTP(env, { from: 'auth@weylandai.com', fromName: 'WeylandAI', to: 'a@example.com', subject: 's', text: 't', replyTo: 'support@weylandai.com' });
+  assert.equal(sent[0].replyTo, 'support@weylandai.com');
+  await sendViaCloudflareSMTP(env, { from: 'auth@weylandai.com', fromName: 'WeylandAI', to: 'a@example.com', subject: 's', text: 't' });
+  assert.equal(sent[1].replyTo, undefined);
+  const mime = buildMimeMessage({ from: 'auth@weylandai.com', fromName: 'WeylandAI', to: 'a@example.com', subject: 's', text: 't', replyTo: 'support@weylandai.com\r\nBcc: x@y.co' });
+  assert.equal(header(mime, 'Reply-To'), 'support@weylandai.com Bcc: x@y.co');
+  assert.doesNotMatch(mime, /^Bcc:/m);
+  assert.equal(header(buildMimeMessage({ from: 'a@b.co', to: 'c@d.co', subject: 's', text: 't' }), 'Reply-To'), null);
+});

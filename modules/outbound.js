@@ -79,7 +79,7 @@ export function quotedPrintable(text) {
  * Now: bodies are quoted-printable, non-ASCII header text is RFC 2047 encoded, CR/LF in
  * header values is flattened, and the message carries a Message-ID.
  */
-export function buildMimeMessage({ from, fromName, to, subject, text, html }) {
+export function buildMimeMessage({ from, fromName, to, subject, text, html, replyTo }) {
   const boundary = `mailguy_${crypto.randomUUID().replace(/-/g, '')}`;
   const fromAddr = oneLine(from).trim();
   const domain = (fromAddr.split('@')[1] || 'mailguyai.com').replace(/[^A-Za-z0-9.-]/g, '') || 'mailguyai.com';
@@ -88,6 +88,7 @@ export function buildMimeMessage({ from, fromName, to, subject, text, html }) {
   const lines = [
     `From: ${formatAddress(fromName, fromAddr)}`,
     `To: ${toHeader}`,
+    ...(replyTo ? [`Reply-To: ${oneLine(replyTo).trim()}`] : []),
     `Subject: ${encodeHeaderValue(subject)}`,
     `Date: ${new Date().toUTCString()}`,
     `Message-ID: <${crypto.randomUUID()}@${domain}>`,
@@ -142,7 +143,7 @@ export function sendingAddress(env, from) {
  * domain); falls back to the legacy raw EmailMessage form only if the binding rejects the
  * structured form itself. Returns the provider's message id. Errors keep Cloudflare's code.
  */
-export async function sendViaCloudflareSMTP(env, { from, fromName, to, subject, text, html }) {
+export async function sendViaCloudflareSMTP(env, { from, fromName, to, subject, text, html, replyTo }) {
   const sender = sendingAddress(env, from);
   const message = {
     to,
@@ -151,7 +152,10 @@ export async function sendViaCloudflareSMTP(env, { from, fromName, to, subject, 
   };
   if (text) message.text = text;
   if (html) message.html = html;
-  if (sender.replyTo) message.replyTo = sender.replyTo;
+  // The caller's own Reply-To wins; otherwise a From that had to move to an onboarded domain
+  // keeps the caller's address as Reply-To.
+  const reply = replyTo || sender.replyTo;
+  if (reply) message.replyTo = reply;
   try {
     const result = await env.SEND_EMAIL.send(message);
     return { messageId: result && result.messageId ? result.messageId : null, from: sender.email, api: 'email-service' };
@@ -165,11 +169,11 @@ export async function sendViaCloudflareSMTP(env, { from, fromName, to, subject, 
       throw err;
     }
   }
-  return legacySend(env, { from: sender.email, fromName, to, subject, text, html });
+  return legacySend(env, { from: sender.email, fromName, to, subject, text, html, replyTo: reply });
 }
 
-async function legacySend(env, { from, fromName, to, subject, text, html }) {
-  const mimeRaw = buildMimeMessage({ from, fromName, to, subject, text, html });
+async function legacySend(env, { from, fromName, to, subject, text, html, replyTo }) {
+  const mimeRaw = buildMimeMessage({ from, fromName, to, subject, text, html, replyTo });
   const encoder = new TextEncoder();
   const encoded = encoder.encode(mimeRaw);
   // CF EmailMessage requires a ReadableStream for the body

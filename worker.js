@@ -151,9 +151,18 @@ export default {
       let body;
       try { body = await request.json(); } catch { return err('Invalid JSON', 'INVALID_INPUT'); }
 
-      const { to, subject, html, text, from_name, from } = body;
+      const { to, subject, html, text, from_name, from, reply_to } = body;
       if (!to || !subject || (!html && !text)) {
         return err('Missing required fields: to, subject, and html or text', 'INVALID_INPUT');
+      }
+      // Optional Reply-To (2026-10-07): one plain address. AuthFor's WeylandAI mail comes from
+      // auth@weylandai.com, which receives nothing, so replies are pointed at support@weylandai.com.
+      let replyTo = null;
+      if (reply_to != null && reply_to !== '') {
+        replyTo = typeof reply_to === 'string' ? reply_to.trim() : '';
+        if (!/^[^\s@<>()",;:\\[\]]+@[^\s@<>()",;:\\[\]]+\.[A-Za-z0-9-]{2,}$/.test(replyTo)) {
+          return err('reply_to must be one plain email address', 'INVALID_INPUT');
+        }
       }
 
       const fromAddr  = from || env.DEFAULT_FROM || `noreply@${env.FROM_DOMAIN || 'mailguyai.com'}`;
@@ -169,6 +178,7 @@ export default {
           subject,
           text: text || '',
           html: html || '',
+          replyTo,
         });
       } catch (e) {
         console.error('[MailguyAI] Delivery failed:', e?.message || e);
