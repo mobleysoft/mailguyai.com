@@ -28,3 +28,7 @@ ENVIRONMENT = "production"
 FROM_DOMAIN = "mailguyai.com"
 DEFAULT_FROM = "noreply@mailguyai.com"
 DEFAULT_FROM_NAME = "MailguyAI"
+# Domains onboarded to Cloudflare Email Sending (mail from them reaches any recipient).
+# mailguyai.com by John 2026-10-07; authfor.com and weylandai.com the same day through
+# mobley chore cf-email-sending. Other From domains are sent from mailguyai.com.
+SENDING_DOMAINS = "mailguyai.com,authfor.com,weylandai.com"
